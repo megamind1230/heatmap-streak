@@ -1,0 +1,189 @@
+#+TITLE: HeatMapStreak
+#+AUTHOR: hassan24641@gmail.com
+#+PROPERTY: header-args :results output :exports both
+
+* Overview
+
+HeatMapStreak is a self-hosted habit tracker built around a GitHub-style year
+heatmap. Sign in, create as many habits as you like, click a day to light it up,
+and watch the streaks grow. A second, aggregated heatmap shows how many habits
+you completed on each day — the more habits ticked off, the darker the cell.
+
+* Features
+
+** Accounts
+- Register and log in with a local account (ASP.NET Core Identity, cookie based).
+- Everything you enter is remembered per account: habits, day toggles and streaks
+  survive restarts because they live in a SQLite database file.
+- Optional Google and GitHub sign-in once client id/secret are configured.
+
+** Habits
+- Unlimited habits per account.
+- Each habit gets its own tab, its own colour picker and its own heatmap.
+- Click a day to turn it on, click it again to turn it off.
+- Optional goals: total days (e.g. "365 days this year"), or N times per
+  week/month.
+
+** Streaks
+- A badge next to every habit showing the /current/ streak and the /longest/
+  streak (consecutive days toggled on).
+
+** Dashboard
+- An aggregated heatmap over all habits: darker = more habits completed that day.
+- Summary cards: total habits, completions this year, best day.
+
+** Export
+- Download your habits as CSV or JSON.
+
+** Quality of life
+- Dark mode toggle (persisted in localStorage).
+- Development seed account, so a fresh clone is usable immediately.
+- Application and launcher logs written to disk.
+- Unit tests for the data and streak services.
+
+* Tech stack
+
+| Layer            | Choice                                                    |
+|------------------+-----------------------------------------------------------|
+| Framework        | ASP.NET Core 8, Blazor (interactive server)               |
+| Data access      | Entity Framework Core 8 + SQLite                          |
+| Authentication   | ASP.NET Core Identity (cookies), optional Google/GitHub   |
+| UI               | Bootstrap 5 + custom CSS (HeatmapStreak.Web/wwwroot)      |
+| Tests            | xUnit + a real SQLite database per test                   |
+| Tooling          | dotnet CLI, single ~run.sh~ launcher                       |
+| Licence          | GPL-3.0 (see [[file:LICENSE][LICENSE]])                                     |
+
+* Getting started
+
+** Requirements
+- The .NET SDK, version 8 or newer (=dotnet --version=). The project targets
+  =net8.0=; newer SDKs build it fine.
+- Nothing else: SQLite is embedded through EF Core, there is no database server
+  to install.
+
+** Run it
+
+#+begin_src sh
+./run.sh
+#+end_src
+
+Then open http://localhost:5161 in a browser. The script restores, builds and
+starts the app in the foreground; press =Ctrl-C= to stop it.
+
+Useful overrides:
+
+#+begin_src sh
+URLS=http://localhost:8080 ./run.sh   # different address/port
+LOG_DIR=/tmp/hms-logs ./run.sh        # somewhere else for logs
+#+end_src
+
+The first start creates (=Data/app.db=) and migrates the database automatically.
+
+** Sign in
+
+In the Development environment a seed account is created on startup if it does
+not exist yet:
+
+| Field    | Value                       |
+|----------+-----------------------------|
+| Email    | hassan24641@gmail.com       |
+| Password | heatmapstreak               |
+
+Override it with configuration keys =Seed:AdminEmail= / =Seed:AdminPassword=
+(environment variables =Seed__AdminEmail= / =Seed__AdminPassword=). The seeder
+never runs outside Development — register normally anywhere else.
+
+Note: the password policy is deliberately relaxed (no uppercase/digit/symbol
+requirement) so that this seed password is accepted; see =Data/IdentitySetup.cs=.
+
+** Tests
+
+#+begin_src sh
+dotnet test
+#+end_src
+
+Each test builds an isolated SQLite database in the system temp folder and runs
+the real migrations against it.
+
+** Logs
+
+Logs live outside the repository, in =~/magnus/heatmap-streak/logs/=:
+
+| File                        | Written by            | Contents                          |
+|-----------------------------+-----------------------+-----------------------------------|
+| =app-YYYY-MM-DD.log=        | the application       | one line per event, UTC timestamps |
+| =run-YYYYMMDD-HHMMSS.log=   | =./run.sh=            | one file per launcher run         |
+
+EF Core's per-query logging is filtered out of the file log to keep it readable;
+everything still reaches the console.
+
+** Configuration
+
+| Key                                   | Where                    | Purpose                        |
+|---------------------------------------+--------------------------+--------------------------------|
+| =ConnectionStrings:DefaultConnection= | =appsettings.json=       | SQLite file, =Data/app.db=     |
+| =Authentication:Google:ClientId=      | =appsettings.json=       | enables Google sign-in         |
+| =Authentication:GitHub:ClientId=      | =appsettings.json=       | enables GitHub sign-in         |
+| =Logging:File:Path=                   | any config source        | overrides the log directory    |
+| =Seed:AdminEmail= / =Seed:AdminPassword= | any config source     | overrides the seed account     |
+
+OAuth only activates when the client id is non-empty; the secret goes through
+user-secrets or environment variables rather than the repository.
+
+* Known issues
+
+Open bugs and their proposed fixes live in [[file:bugs.org][bugs.org]]; the roadmap is in
+[[file:plans-and-todos.org][plans-and-todos.org]].
+
+* Project structure
+
+#+begin_src text
+heatmap-streak/
+├── HeatMapStreak.slnx              solution (web + test projects)
+├── run.sh                          restore → build → run, writes log files
+├── README.org                      this file
+├── plans-and-todos.org             roadmap / checklist
+├── bugs.org                        open bugs and how to fix them
+├── changelog.org                   change history
+├── LICENSE                          GPL-3.0, with the project's notice on top
+│
+├── HeatMapStreak.Web/
+│   ├── Program.cs                  service wiring, migrate + seed on startup
+│   ├── appsettings.json            connection string, OAuth ids
+│   ├── Data/
+│   │   ├── ApplicationDbContext.cs EF model (Habits, DayEntries, cascade rules)
+│   │   ├── ApplicationUser.cs      Identity user + habits
+│   │   ├── DbSeeder.cs             development seed account
+│   │   ├── IdentitySetup.cs        shared Identity/password policy
+│   │   ├── Migrations/             EF migrations
+│   │   └── app.db                  the SQLite database (git-ignored)
+│   ├── Models/
+│   │   ├── Habit.cs                name, colour, goal, owning user
+│   │   ├── DayEntry.cs             one toggled day (PK: habit + date)
+│   │   ├── GoalType.cs             none / total days / periodic
+│   │   └── GoalPeriod.cs           weekly / monthly
+│   ├── Services/
+│   │   ├── HabitService.cs         CRUD, toggle, year + aggregate queries
+│   │   ├── IHabitService.cs
+│   │   ├── StreakService.cs        current and longest streak
+│   │   └── IStreakService.cs
+│   ├── Logging/
+│   │   ├── FileLoggerProvider.cs   daily file log, EF query filtering
+│   │   └── LoggingBuilderExtensions.cs
+│   ├── Components/
+│   │   ├── Pages/                  Home, Habits, Dashboard, Export, Error
+│   │   ├── Shared/                 Heatmap, AggregatedHeatmap, StreakBadge, DarkModeToggle
+│   │   ├── Layout/                 MainLayout, NavMenu
+│   │   ├── Account/                Login, Register, manage account pages
+│   │   └── App.razor, Routes.razor
+│   └── wwwroot/                    app.css, bootstrap/, js/site.js, favicon
+│
+├── HeatMapStreak.Tests/
+│   ├── TestDatabase.cs             temp SQLite database per test class
+│   ├── StreakServiceTests.cs
+│   ├── HabitServiceTests.cs
+│   └── DbSeederTests.cs
+│
+└── Components/, Models/, Services/, wwwroot/   empty leftovers from an earlier
+                                                layout, safe to delete (todo)
+#+end_src

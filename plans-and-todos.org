@@ -1,0 +1,78 @@
+#+TITLE: HeatMapStreak — plans and todos
+#+AUTHOR: hassan24641@gmail.com
+
+Legend: =- [X]= done · =- [-]= in progress · =- [ ]= not started.
+Newest state of each item always lives here; the reasoning for the open bugs is
+in [[file:bugs.org][bugs.org]].
+
+* Core app
+
+- [X] Sign in / log in, with the account's data remembered across sessions
+      (ASP.NET Core Identity + SQLite)
+- [X] Add as many habit pages as the user wants — no per-account limit
+- [X] Show the year as a heatmap
+- [X] Clicking a day toggles it on/off, remembered per habit for all habits
+- [X] Unlimited habits per account
+- [X] Each habit has its own tab (nav tabs on /habits)
+- [X] Each habit can have its own colour (colour picker, drives the heatmap)
+- [X] Dashboard with an aggregated heatmap — more habits toggled on a day, the
+      darker the cell
+- [X] Streak counter: current and longest streak per habit (StreakBadge)
+- [X] Habit goals (total days, weekly/monthly) — extra, already present
+- [X] CSV / JSON export of habit data — extra, already present
+- [X] Dark mode toggle — extra, already present
+
+* Infrastructure
+
+- [X] =run.sh=: restore → build → run in the foreground at http://localhost:5161
+      (=URLS= / =LOG_DIR= overridable)
+- [X] SQLite connection string fixed for Linux (was =Data\\app.db=, which created
+      a literal backslash file); existing data carried over to =Data/app.db=
+- [X] Auto-migrate on startup (=db.Database.Migrate()= in =Program.cs=), so a
+      fresh clone works without the EF CLI
+- [X] Development seed account =hassan24641@gmail.com= / =heatmapstreak=,
+      created idempotently at startup (=Data/DbSeeder.cs=)
+- [X] Password policy relaxed (no upper/digit/symbol) in one shared place
+      (=Data/IdentitySetup.cs=) so app and tests agree
+- [X] File logging to =~/magnus/heatmap-streak/logs/= (daily =app-*.log=, plus
+      one =run-*.log= per launcher run)
+- [X] Unit tests: 17 xUnit tests over streaks, habit service and the seeder,
+      each on an isolated migrated SQLite database
+- [X] Documents: README.org, plans-and-todos.org, bugs.org, changelog.org,
+      LICENSE (GPL-3.0, with the project name/description and copyright notice)
+- [X] .gitignore covers build output, IDE files, databases and log files
+
+* Open todos
+
+** From bugs.org (documented, not yet fixed)
+
+- [ ] #1 Export only covers the current year — extend to full history
+- [ ] #2 CSV export does not escape quotes inside habit names
+- [ ] #3 Selection jumps to the first habit after editing or deleting one
+- [ ] =HabitService.UpdateHabitAsync= has no ownership check (#4)
+- [ ] #5 Empty =catch {}= blocks hide auth failures and render a misleading page
+- [ ] #6 =StreakService= scans a =List= inside a loop → use a =HashSet=; Export
+      also does one query per habit (N+1)
+- [ ] #7 No year navigation: last year's data exists but cannot be viewed
+- [ ] #8 =Database.Migrate()= also runs in production without a guard
+
+** Housekeeping
+
+- [ ] Delete the empty leftover root folders (=Components/=, =Models/=,
+      =Services/=, =wwwroot/=) — not part of the solution, zero files
+- [ ] Delete =HeatMapStreak.Web/Data/app.db.stale.bak= once the migrated
+      database is confirmed good
+- [ ] Decide whether the legacy account =admin@heatmapstreak.com=
+      (EmailConfirmed = 0) should stay in the database
+- [ ] Consider a real admin role — only if something ever needs gating; the app
+      has no admin-only surface today
+- [ ] HTTPS: =run.sh= is http-only, so =UseHttpsRedirection()= logs a warning.
+      Either drop the middleware for dev or add a dev certificate
+
+* Ongoing
+
+- [-] Keep README.org, plans-and-todos.org, bugs.org and changelog.org in sync
+      with every change (skill rule: no doc left stale)
+- [-] Comment ambiguous code as it is touched, and keep the codebase on
+      SOLID / clean-code lines — =HabitService.UpdateHabitAsync= is the next
+      offender to fix (#4)

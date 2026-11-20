@@ -1,0 +1,128 @@
+#+TITLE: HeatMapStreak — bugs
+#+AUTHOR: hassan24641@gmail.com
+
+Findings from the 2026-11-20 review of the running code. Each entry says what
+breaks, where it lives, how bad it is, and the smallest fix. Nothing in *Open*
+is fixed yet — they are listed in [[file:plans-and-todos.org][plans-and-todos.org]] as todos.
+
+* Open
+
+** #1 High — Export only includes the current year
+- Where :: =HeatMapStreak.Web/Components/Pages/Export.razor:67= (=:82=, =:83=)
+- What :: The export loads =DateTime.UtcNow.Year= and the CSV writer hard-codes
+  the same year for its date range, so entries from earlier years are silently
+  left out of both CSV and JSON.
+- Impact :: Data loss for the user: everything they tracked last year "disappears"
+  when they export.
+- Fix :: Query all years (=where d.Date.Year <= current=, or expose
+  =GetEntriesAsync(habitId, userId)= without a year bound) and let the CSV range
+  follow the actual min/max dates instead of =DateTime.UtcNow.Year=.
+
+** #2 Medium — CSV export does not escape quotes in habit names
+- Where :: =HeatMapStreak.Web/Components/Pages/Export.razor:87=
+- What :: =$"\"{habit.Name}\",{date:yyyy-MM-dd},{completed}"= wraps the name in
+  quotes but never doubles embedded quotes, so a habit called =Say "hi"= emits
+  =Say "hi"= as an unbalanced quoted field.
+- Impact :: The CSV opens as garbage / shifts columns in Excel or pandas.
+- Fix :: =$"\"{habit.Name.Replace("\"", "\"\"")}\",{...}"= — or hand the list to
+  a real CSV writer (=CsvHelper= / =TextFieldParser=).
+
+** #3 Low — Selection jumps to the first habit after edit or delete
+- Where :: =HeatMapStreak.Web/Components/Pages/Habits.razor:279= and =:294=
+- What :: After saving an edit, or deleting a habit, the page always calls
+  =SelectHabit(UserHabits[0].Id)= instead of re-selecting the habit that was
+  just edited (=:180= is fine — that one is the intended "first load" case).
+- Impact :: You edit "Read"'s colour and get thrown back to whatever habit
+  happens to be first in the list.
+- Fix :: In =SaveHabit= re-select =EditingHabit.Id= when editing (capture the id
+  before the reload); in =DeleteHabit= keep =UserHabits[0]= only because there
+  is nothing left to select — that part is correct, so the fix is limited to
+  =SaveHabit=.
+
+** #4 Medium — =UpdateHabitAsync= trusts the caller with no ownership check
+- Where :: =HeatMapStreak.Web/Services/HabitService.cs:31= (compare
+  =:38= =DeleteHabitAsync=, which does check =h.UserId == userId=)
+- What :: Any code path that passes a =Habit= object can update any user's habit
+  — only the UI happens to load the right row first. =CreateHabitAsync= likewise
+  takes =UserId= from the caller without validation.
+- Impact :: Broken authorization invariant: an IDOR-style hole the moment a new
+  page or endpoint passes user input through. Also a SOLID/DRY smell — the rule
+  "you may only touch your own habits" is written twice, differently.
+- Fix :: Change the signature to =UpdateHabitAsync(Habit habit, string userId)=
+  (or =UpdateHabitAsync(int id, string userId, Action<Habit> mutate)=) and do
+  =db.Habits.AnyAsync(h => h.Id == habit.Id && h.UserId == userId)= before
+  updating, returning/throwing when it fails — mirroring =DeleteHabitAsync=.
+
+** #5 Medium — Empty =catch {}= blocks swallow auth failures
+- Where :: =Components/Pages/Habits.razor:166=, =:175=,
+  =Components/Pages/Dashboard.razor:67=, =Components/Pages/Export.razor:62=
+- What :: Resolving the current user is wrapped in =try { ... } catch { }=. When
+  it fails, =CurrentUserId= stays empty and the page happily renders "No habits
+  yet. Click '+ Add Habit'!" instead of telling the user anything.
+- Impact :: A signed-out or broken circuit looks like an empty account; users
+  can waste time adding habits that then fail to save (the service bails out on
+  an empty user id). Silently swallowed exceptions also hide real bugs.
+- Fix :: Drop the =catch= and let the =AuthorizeView/= =[Authorize]= guard do its
+  job, or catch =Exception=, log it (=ILogger=) and redirect to
+  =/Account/Login?ReturnUrl=...=. Never catch-and-ignore.
+
+** #6 Low — Streak and export queries scale poorly
+- Where :: =HeatMapStreak.Web/Services/StreakService.cs:30= (and =:25=, =:33=),
+  =Components/Pages/Export.razor:69-73=
+- What :: All completed dates are loaded into a =List<DateOnly>= and then
+  =Contains= is called inside a =while= loop — a linear scan per day walked.
+  Separately, =Export= issues one =GetYearEntriesAsync= query per habit (N+1).
+- Impact :: A user with years of history pays O(days × list length) on every
+  habit render; export does 1 + N queries instead of one join.
+- Fix :: =var completed = completedDates.ToHashSet();= before the loops, and
+  prefer pushing the "walk backwards" logic into SQL (=MAX= window / recursive
+  CTE) or at least querying all habits' entries in one statement with a join on
+  =Habit.UserId=.
+
+** #7 Medium — No way to view previous years
+- Where :: =Components/Pages/Habits.razor:144=,
+  =Components/Pages/Dashboard.razor:51=, =Components/Pages/Export.razor:67=
+- What :: Every page hard-codes =CurrentYear = DateTime.UtcNow.Year=. Entries
+  from earlier years are stored (the service layer takes a =year= parameter) but
+  no UI can ever reach them.
+- Impact :: Old data is effectively invisible; combined with #1 it cannot even
+  be exported.
+- Fix :: Add a year selector (‹ 2025 ›) to the habit page, dashboard and export,
+  threading the chosen year into =GetYearEntriesAsync= /
+  =GetAggregatedYearDataAsync= / the export query. The =Heatmap= component
+  already takes a =Year= parameter, so the view side needs almost no change.
+
+** #8 Low — Migrations run unconditionally, including production
+- Where :: =HeatMapStreak.Web/Program.cs:71=
+- What :: =db.Database.Migrate()= executes on every start in every environment.
+- Impact :: A deploy against a production database applies schema changes the
+  moment the process boots, with no backup, no approval and no rollback — a
+  failed migration takes the whole site down at startup.
+- Fix :: Keep it for Development (or gate on a config flag such as
+  =Database:AutoMigrate=, default true only in Development) and let production
+  run =dotnet ef database update= (or =dotnet database update=) as an explicit
+  release step.
+
+* Fixed (2026-11-20)
+
+** Windows-only connection string created a literal =Data\app.db= file
+- Was :: =appsettings.json= used =DataSource=Data\\app.db=, which on Linux
+  produced a file literally named =Data\app.db= in the project folder while the
+  "real" =Data/app.db= sat stale and empty (identity tables only, no =Habits=).
+- Now :: forward-slash path in =appsettings.json= and the =.csproj=, existing
+  user/habits/day entries moved into =Data/app.db=, stray files removed,
+  stale copy kept as =Data/app.db.stale.bak=.
+
+** Fresh clone crashed with "no such table: Habits"
+- Was :: nothing ever applied migrations; the EF CLI had to be installed and run
+  by hand.
+- Now :: =Program.cs= calls =Database.Migrate()= in a scope at startup, verified
+  against a clone with no database at all.
+
+** No way to start the project
+- Now :: =run.sh= (restore → build → run, log file per run).
+
+** No tests, no logs, no documentation
+- Now :: 17 xUnit tests (=HeatMapStreak.Tests=), file logging under
+  =~/magnus/heatmap-streak/logs/=, and README / plans-and-todos / bugs /
+  changelog / LICENSE.

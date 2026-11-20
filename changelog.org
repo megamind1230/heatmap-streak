@@ -1,0 +1,66 @@
+#+TITLE: HeatMapStreak — changelog
+#+AUTHOR: hassan24641@gmail.com
+
+Newest entry first. Plain-language history of what actually changed in the repo.
+
+* 2026-11-20 (2) — Seed account, file logging, tests and documentation
+
+** Added
+- =Data/DbSeeder.cs= — creates the development account
+  (=hassan24641@gmail.com= / =heatmapstreak=) at startup in Development only,
+  idempotently, with the email pre-confirmed. Credentials overridable through
+  =Seed:AdminEmail= / =Seed:AdminPassword=.
+- =Data/IdentitySetup.cs= — single place holding the Identity options
+  (=RequireConfirmedAccount=false= plus relaxed password rules: no uppercase,
+  digit or symbol requirement) shared by the app and the tests, so the two can
+  not drift apart.
+- =Logging/FileLoggerProvider.cs= + =Logging/LoggingBuilderExtensions.cs= —
+  daily application log at =~/magnus/heatmap-streak/logs/app-YYYY-MM-DD.log=,
+  EF Core's per-query chatter filtered out, writes can never take the app down.
+  Directory overridable with =Logging:File:Path=.
+- =run.sh= now also writes one =run-YYYYMMDD-HHMMSS.log= per invocation
+  (=LOG_DIR= overrides the location) while still printing to the terminal.
+- =HeatMapStreak.Tests= project (xUnit, added to =HeatMapStreak.slnx=): 17 tests
+  covering =StreakService= (current/longest/broken/foreign-user cases),
+  =HabitService= (toggle on/off, ownership, year filtering, aggregation,
+  cascade delete) and =DbSeeder= (creates, idempotent, default email), each on
+  its own migrated SQLite database.
+- Documents: =README.org=, =plans-and-todos.org=, =bugs.org=,
+  =changelog.org= (this file) and =LICENSE= (GPL-3.0).
+
+** Changed
+- =Program.cs= registers the file logger and calls =DbSeeder= right after the
+  migrations, both in Development.
+- =.gitignore= also covers =*.db-shm=, =*.db-wal= and =*.stale.bak=.
+- The pre-existing =LICENSE= is now the single licence file: it opens with the
+  project name, a short description and the copyright notice
+  (hassan24641@gmail.com), followed by the unmodified GPL-3.0 text. The
+  duplicate =LICENCE= file created earlier was removed.
+
+** Verified
+- =dotnet test= → 17/17 passing.
+- =./run.sh= → seed account created, login with the seeded credentials returns
+  302 to =/=, =/habits= renders authenticated, both log files written.
+
+* 2026-11-20 (1) — =run.sh=, Linux database path fix, auto-migration
+
+** Added
+- =run.sh= at the repository root: checks for a .NET 8+ SDK, restores, builds
+  and runs the app in the foreground at http://localhost:5161 (=URLS= to change
+  it).
+
+** Fixed
+- Connection string used a Windows path (=Data\\app.db=), so on Linux the app
+  wrote to a stray file named literally =Data\app.db= while =Data/app.db= stayed
+  stale (identity tables only, no =Habits= / =DayEntries=). Now uses
+  =Data/app.db= everywhere; the real data (1 account, 2 habits, 16 day entries,
+  both migrations applied) was copied over and the stray files deleted. The old
+  stale database is kept as =Data/app.db.stale.bak=.
+- A fresh clone crashed with "no such table: Habits": nothing ever applied
+  migrations. =Program.cs= now runs =db.Database.Migrate()= in a scope at
+  startup (see =bugs.org= #8 for the production caveat).
+
+** Removed
+- Empty leftover files/dirs left from an earlier layout are still present at the
+  repo root (=Components/=, =Models/=, =Services/=, =wwwroot/=) — tracked as a
+  housekeeping todo rather than deleted here.

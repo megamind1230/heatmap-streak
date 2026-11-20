@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="HeatMapStreak.Web/HeatMapStreak.Web.csproj" />
+  <Project Path="HeatMapStreak.Tests/HeatMapStreak.Tests.csproj" />
+</Solution>
